@@ -1,4 +1,4 @@
-﻿using System;
+﻿using System.Web;
 
 namespace i18n
 {
@@ -30,9 +30,16 @@ namespace i18n
         /// <returns>
         /// Processed (and possibly modified) entity.
         /// </returns>
-        string ProcessOutgoing(
+        string ProcessOutgoingNuggets(
             string entity, 
             string langtag, 
             System.Web.HttpContextBase context);
+
+        /// <summary>
+        /// Localize any HTTP headers in the response containing URLs.
+        /// </summary>
+        /// <param name="langtag">Langtag to be patched into URLs</param>
+        /// <param name="context">Http context which headers to rewrite</param>
+        void ProcessOutgoingHeaders(string langtag, HttpContextBase context);
     }
 }

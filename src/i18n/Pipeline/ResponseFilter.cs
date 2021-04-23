@@ -1,9 +1,7 @@
 ﻿using System;
-using System.Linq;
 using System.IO;
 using System.Text;
 using i18n.Helpers;
-using i18n.Domain.Concrete;
 
 namespace i18n
 {
@@ -154,10 +152,13 @@ namespace i18n
             //   <link href="..."> tags
             if (m_earlyUrlLocalizer != null)
             {
-                entity = m_earlyUrlLocalizer.ProcessOutgoing(
-                    entity, 
-                    m_httpContext.GetPrincipalAppLanguageForRequest().ToString(),
+                var langtag = m_httpContext.GetPrincipalAppLanguageForRequest().ToString();
+
+                entity = m_earlyUrlLocalizer.ProcessOutgoingNuggets(
+                    entity, langtag,
                     m_httpContext);
+
+                 m_earlyUrlLocalizer.ProcessOutgoingHeaders(langtag, m_httpContext);
             }
 
             //DebugHelpers.WriteLine("ResponseFilter::Write -- entity:\n{0}", entity);

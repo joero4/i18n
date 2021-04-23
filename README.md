@@ -1,4 +1,7 @@
 # i18n (v2)
+
+![Build Status](https://github.com/turquoiseowl/i18n/workflows/CI/badge.svg)
+
 ## Smart internationalization for ASP.NET
 ```
     PM> Install-Package i18N
@@ -56,7 +59,18 @@ of your application's source files:
   <appSettings>
     <add key="i18n.DirectoriesToScan" value=".." /> <!-- Rel to web.config file -->
     <add key="i18n.WhiteList" value="*.cs;*.cshtml;*.sitemap" />
-    <add key="i18n.BlackList" value=".\js\kendo;.\js\angular" />
+    <add key="i18n.BlackList" value=".\js\kendo;.\js\angular;.\*\dist" />
+  </appSettings>
+```
+
+The following configuration options are optional. ```i18n.DisableReferences``` allows you to generate lighter pot/po files by deleting 
+references to your translation tokens (nuggets) and ```i18n.GenerateTemplatePerFile``` generates a pot file per file scanned and merges
+all po files into messages.po:
+
+```xml
+  <appSettings>
+    <add key="i18n.DisableReferences" value="true" />
+    <add key="i18n.GenerateTemplatePerFile" value="true" />
   </appSettings>
 ```
 
@@ -71,6 +85,9 @@ code shows the most common options:
             // Change from the default of 'en'.
             i18n.LocalizedApplication.Current.DefaultLanguage = "fr";
 
+            // Change from the default of 'i18n.langtag'.
+            i18n.LocalizedApplication.Current.CookieName = "i18n_langtag";
+
             // Change from the of temporary redirects during URL localization
             i18n.LocalizedApplication.Current.PermanentRedirects = true;
 
@@ -80,11 +97,43 @@ code shows the most common options:
             // Change the URL localization scheme from Scheme1.
             i18n.UrlLocalizer.UrlLocalizationScheme = i18n.UrlLocalizationScheme.Scheme2;
 
+            // Change i18n's expectation for the ASP.NET application's virtual application root path on the server, 
+            // used by Url Localization. Defaults to "/".
+            //i18n.LocalizedApplication.Current.ApplicationPath = "/mysite";
+
+            // Specifies whether the key for a message may be assumed to be the value for
+            // the message in the default language. Defaults to true.
+            //i18n.LocalizedApplication.Current.MessageKeyIsValueInDefaultLanguage = false;
+
+            // Specifies a custom method called after a nugget has been translated
+            // that allows the resulting message to be modified, for instance according to content type.
+            // See [Issue #300](https://github.com/turquoiseowl/i18n/issues/300) for example usage case.
+            i18n.LocalizedApplication.Current.TweakMessageTranslation = delegate(System.Web.HttpContextBase context, i18n.Helpers.Nugget nugget, i18n.LanguageTag langtag, string message)
+            {
+                switch (context.Response.ContentType)
+                {
+                    case "text/html":
+                        return message.Replace("\'", "&apos;");
+                }
+                return message;
+            };
+
             // Blacklist certain URLs from being 'localized' via a callback.
             i18n.UrlLocalizer.IncomingUrlFilters += delegate(Uri url) {
                 if (url.LocalPath.EndsWith("sitemap.xml", StringComparison.OrdinalIgnoreCase)) {
                     return false; }
                 return true;
+            };
+
+            // Extend (+=) or override (=) the default handler for Set-PAL event.
+            // The default handler applies the setting to both the CurrentCulture and CurrentUICulture
+            // settings of the thread, as shown below.
+            i18n.LocalizedApplication.Current.SetPrincipalAppLanguageForRequestHandlers = delegate(System.Web.HttpContextBase context, ILanguageTag langtag)
+            {
+                // Do own stuff with the language tag.
+                // The default handler does the following:
+                if (langtag != null) {
+                    Thread.CurrentThread.CurrentCulture = Thread.CurrentThread.CurrentUICulture = langtag.GetCultureInfo(); }
             };
 
             // Blacklist certain URLs from being translated using a regex pattern. The default setting is:
@@ -93,8 +142,14 @@ code shows the most common options:
             // Whitelist content types to translate. The default setting is:
             //i18n.LocalizedApplication.Current.ContentTypesToLocalize = new Regex(@"^(?:(?:(?:text|application)/(?:plain|html|xml|javascript|x-javascript|json|x-json))(?:\s*;.*)?)$");
 
-			// Change the types of async postback blocks that are localized
-			//i18n.LocalizedApplication.Current.AsyncPostbackTypesToTranslate = "updatePanel,scriptStartupBlock,pageTitle";
+            // Change the types of async postback blocks that are localized
+            //i18n.LocalizedApplication.Current.AsyncPostbackTypesToTranslate = "updatePanel,scriptStartupBlock,pageTitle";
+
+            // Change which languages are parsed from the request, like skipping  the "Accept-Language"-header value. The default setting is:
+            //i18n.HttpContextExtensions.GetRequestUserLanguagesImplementation = (context) => LanguageItem.ParseHttpLanguageHeader(context.Request.Headers["Accept-Language"]);
+
+            // Override the i18n service injection. See source code for more details!
+            //i18n.LocalizedApplication.Current.RootServices = new Myi18nRootServices();
         }
     }
 ```
@@ -301,7 +356,7 @@ by default. To enable this feature:
 ```
 
 Note that note all PO editors support msgctxt and indeed may be thrown by the value
-when present in .PO files. See Issue #90 for more details.
+when present in .PO files. See [Issue #90](https://github.com/turquoiseowl/i18n/issues/90) for more details.
 
 #### Multi-line messages
 
@@ -347,6 +402,8 @@ Note: Refer to
 [Issue #163](https://github.com/turquoiseowl/i18n/issues/163#issuecomment-68811808) 
 for more on IIS compression settings.
 
+Note: in some scenarios, it might be desirable to localize Javascipt (.js) files, making your application case 1. To easily disable static file compression, use the IIS manager and click on site name, Compression and uncheck "Enable static content compression".
+
 Note: The Microsoft ScriptManager compresses responses to requests for ScriptResource.axd so these responses will always be 
 compressed and the script that is returned by the ScriptManager will not be localized even if you disable static file compression. 
 
@@ -357,6 +414,11 @@ adding `i18n.PostBuild.exe` as a project reference:
 
 ```
     "$(TargetDir)i18n.PostBuild.exe" "$(ProjectDir)\web.config"
+```
+You can find i18n.PostBuild.exe file under packages folder: 
+
+``` 
+    {your_solution}\packages\{package_version}\tools\i18n.PostBuild\i18n.PostBuild.exe
 ```
     
 Alternatively, you may choose to install the `i18n.POTGenerator.vsix` Visual Studio extension (2012/2013).
@@ -381,6 +443,46 @@ locale/es/messages.po
 locale/es-MX/messages.po
 ```
 
+#### Custom Modifications To Translations
+
+Nuggets translations can be modified at runtime as follows:
+
+```
+    protected void Application_Start()
+    {
+        ...
+        // Specifies a custom method called after a nugget has been translated
+        // that allows the resulting message to be modified, for instance according to content type.
+        // See [Issue #300](https://github.com/turquoiseowl/i18n/issues/300) for example usage case.
+        i18n.LocalizedApplication.Current.TweakMessageTranslation = delegate(System.Web.HttpContextBase context, i18n.Helpers.Nugget nugget, i18n.LanguageTag langtag, string message)
+        {
+            switch (context.Response.ContentType)
+            {
+                case "text/html":
+                    return message.Replace("\'", "&apos;");
+            }
+            return message;
+        };
+    }
+```
+
+#### PO customization
+
+i18n allows you to change the PO file name to use and use PO files from other sources (when working with multiple projects for example).
+To enable this feature, you can set :
+
+
+```xml
+  <appSettings>
+    ...
+    <add key="i18n.LocaleFilename" value="messages" />
+    <add key="i18n.LocaleOtherFiles" value="external1;external2" /><!-- relative path from the directory of {LocaleFilename}.po-->
+    ...
+  </appSettings>
+```
+
+Note : i18n.LocaleOtherFiles paths are relative to the directory of the file {i18n.LocaleFilename}.po (messages.po by default).
+
 ### URL Localization
 
 In keeping with emerging standards for internationalized web applications, i18n provides support for
@@ -401,7 +503,7 @@ scheme, Scheme2, will show the language tag only if it is not the default.
 
 URL localization can be disabled by setting the scheme to ```i18n.UrlLocalizationScheme.Void``` in ```Application_Start```:
 
-```
+```csharp
     protected void Application_Start()
     {
         ...
@@ -409,6 +511,22 @@ URL localization can be disabled by setting the scheme to ```i18n.UrlLocalizatio
         i18n.UrlLocalizer.UrlLocalizationScheme = i18n.UrlLocalizationScheme.Void;
     }
 ```
+
+Without URL localization, i18n will rely on the cookie "i18n.langtag" to determine the current language for each request. This means that the language change/setting feature on your site should change the cookie and set the new PrincipalAppLanguage:
+
+```csharp
+  HttpCookie c = new HttpCookie("i18n.langtag") { 
+    Value = Request.QueryString("newLanguage"), 
+    HttpOnly = true, 
+    Expires = DateTime.UtcNow.AddYears(1) 
+    };
+  Response.Cookies.Add(c);
+  i18n.ILanguageTag p = default(i18n.ILanguageTag);
+  p = i18n.LanguageTag.GetCachedInstance(Request.QueryString("newLanguage"));
+  i18n.HttpContextExtensions.SetPrincipalAppLanguageForRequest(this.Context, p);
+```
+
+If you are experiencing problems with static content, maybe also related to browser caching and are having trouble getting the rules for URL exclusion in the following paragraphs to work, the Void scheme might we worth looking into. Please see [Issue #385](https://github.com/turquoiseowl/i18n/issues/385).
 
 #### Exclude URLs from being localized
 
@@ -422,12 +540,12 @@ There are two ways to instruct i18n NOT to localize a URL:
 
 Firstly, you can set a RegEx pattern to match against the localpath part of the URLs to be excluded. For instance:
 
-```
+```csharp
     protected void Application_Start()
     {
         ...
         // Blacklist certain URLs from being 'localized'.
-        i18n.UrlLocalizer.QuickUrlExclusionFilter = new System.Text.RegularExpressions.Regex(@"(?:sitemap\.xml|\.css|\.less|\.jpg|\.jpeg|\.png|\.gif|\.ico|\.svg|\.woff|\.woff2|\.ttf|\.eot)$", RegexOptions.IgnoreCase);
+        i18n.UrlLocalizer.QuickUrlExclusionFilter = new System.Text.RegularExpressions.Regex(@"(^\/api\/)|((sitemap\.xml|\.css|\.less|\.jpg|\.jpeg|\.png|\.gif|\.ico|\.svg|\.woff|\.woff2|\.ttf|\.eot)$)", RegexOptions.IgnoreCase);
     }
 ```
 
@@ -437,7 +555,7 @@ feel free to override or set to null to disable.
 For finer control, the second method is to define filter delegates that are passed the URL and return
 true if the URL is to be localized, otherwise false. For example:
 
-```
+```csharp
     protected void Application_Start()
     {
         ...
@@ -467,10 +585,10 @@ when using i18n with Scheme2.
 
 You can do this by prefixing the URL like so:
 
-```
-	<link rel="alternate" hreflang="en" href="@(EarlyUrlLocalizer.IgnoreLocalizationUrlPrefix)http://mysite.com" />
-	<link rel="alternate" hreflang="fr" href="http://mysite.com/fr" />
-	<link rel="alternate" hreflang="es" href="http://mysite.com/es" />
+```xml
+    <link rel="alternate" hreflang="en" href="@(EarlyUrlLocalizer.IgnoreLocalizationUrlPrefix)http://mysite.com" />
+    <link rel="alternate" hreflang="fr" href="http://mysite.com/fr" />
+    <link rel="alternate" hreflang="es" href="http://mysite.com/es" />
 ```
 
 When i18n goes through the process for localizing outgoing URLs, this prefix will be stripped and the rendered URL 
@@ -552,7 +670,7 @@ For example, suppose you wish the default language to vary as follows:
 
 This can be achieved as follows:
 
-```
+```csharp
     protected void Application_Start()
     {
         ...
@@ -674,8 +792,13 @@ On selection of a language in the above code, the AccountController.SetLanguage 
         // response (Late URL Localization).
         HttpContext.SetPrincipalAppLanguageForRequest(lt);
         // Patch in the new langtag into any return URL.
-        if (returnUrl.IsSet()) {
-            returnUrl = LocalizedApplication.Current.UrlLocalizerForApp.SetLangTagInUrlPath(HttpContext, returnUrl, UriKind.RelativeOrAbsolute, lt == null ? null : lt.ToString()).ToString(); }
+        if (returnUrl.IsSet())
+        {
+            if (LocalizedApplication.Current.UrlLocalizerForApp.FilterOutgoing(returnUrl, HttpContext.Request.Url)) // if url wants to be localized
+            {
+                returnUrl = LocalizedApplication.Current.UrlLocalizerForApp.SetLangTagInUrlPath(HttpContext, returnUrl, UriKind.RelativeOrAbsolute, lt?.ToString()).ToString();
+            }
+        }
         // Redirect user agent as approp.
         return this.Redirect(returnUrl);
     }
@@ -690,7 +813,7 @@ There is a ```GetText``` extension method to HttpContextBase provided for this.
 For example, you can do the following from within an MVC controller action:
 
 
-```
+```csharp
 using System;
 using System.Web.Mvc;
 using i18n;
@@ -721,10 +844,39 @@ by default it is false and so msgcomment argument should be passed as null or em
 Furthermore, you can access the translation of a complete body of text containing zero or more nuggets
 that require parsing using the ```ParseAndTranslate``` extension method to HttpContextBase, as follows:
 
-```
+```csharp
     string entity = HttpContext.ParseAndTranslate("Hi - [[[Sign in]]]");
 ```
 
+or if outside of an HttpContext, for example a background job running an emailing service task:
+
+```csharp
+    string entity = i18n.LanguageHelpers.ParseAndTranslate("[[[Thank you for your payment]]]");
+```
+
+which will translate using the app's default language (i18n.LocalizedApplication.DefaultLanguage), or
+
+```csharp
+    string entity = i18n.LanguageHelpers.ParseAndTranslate("[[[Thank you for your payment]]]", "fr-CA;q=1,fr;q=0.5");
+```
+
+which will use the app language that best matches those specified, or better still
+
+```csharp
+    // During earlier HTTP request from user, save their language(s).
+    string userLanguages = HttpContext.GetRequestUserLanguagesAsString();
+
+    // Switch to background job.
+    HostingEnvironment.QueueBackgroundWorkItem(ct => {
+
+        // Translate using user's languages obtained earlier.
+        string entity = i18n.LanguageHelpers.ParseAndTranslate("[[[Thank you for your payment]]]", userLanguages);
+        ...
+
+    });
+```
+
+which will match against the languages obtained from the user's browser at some point earlier.
 
 ### Language Matching
 
@@ -822,13 +974,14 @@ By default, only blocks with a type of **updatePanel**, **scriptStartupBlock**, 
 localize segments in other block types by changing the value of AsyncPostbackTypesToTranslate in Application_Start. For 
 example, to include the **hiddenField** blocks, add the following to Application_Start
 
-```
+```csharp
 i18n.LocalizedApplication.Current.AsyncPostbackTypesToTranslate = "updatePanel,scriptStartupBlock,pageTitle,hiddenField";
 ```
 
 ### OWIN support
 
-Support for OWIN is available to a limited extent. See [Issue #241](https://github.com/turquoiseowl/i18n/issues/241) for more details.
+Support for OWIN is available to a limited extent. See issues [#241](https://github.com/turquoiseowl/i18n/issues/241) and
+[#333](https://github.com/turquoiseowl/i18n/issues/333) for more details.
 i18n is created based on `HttpContextBase` in System.Web assembly, which means the foundation was built on IIS pipeline.
 Currently we support OWIN hosted in IIS only, so it is still dependent on System.Web.  Self-hosted OWIN is not supported.
 
@@ -837,25 +990,54 @@ Here is how to use i18n in OWIN Web API projects:
 - Add reference to i18n.Adapter.OwinSystemWeb (available on NuGet as well)
 - Add reference to Microsoft.Owin.Host.SystemWeb.  If you add i18n.Adapter.OwinSystemWeb from NuGet it should automatically add this for you.
 - No need to register HttpModule in web.config file.
-- Add the following middleware registration into your startup sequence.
+- Add the following middleware registration into your startup sequence:
 
-```
+```csharp
 public partial class Startup
 {
     public void Configuration(IAppBuilder app)
     {
         ...
 
-        // i18n middlewares
-        app.Use(typeof(i18n.Adapter.OwinSystemWeb.UrlLocalizationMiddleware));
-        app.Use(typeof(i18n.Adapter.OwinSystemWeb.EntityLocalizationMiddleware));
-
         // i18n config
         i18n.LocalizedApplication.Current.DefaultLanguage = "en";
+
+        // i18n middleware
+        app.Use(typeof(i18n.Adapter.OwinSystemWeb.UrlLocalizationMiddleware));
+
+        // i18n response filter installer for static files
+        var staticFileOptions = new StaticFileOptions
+        {
+            OnPrepareResponse = (staticFileResponseContext) =>
+            {
+                if (staticFileResponseContext.File.Name.EndsWith(".js", StringComparison.OrdinalIgnoreCase))
+                {
+                    HttpContextBase context = staticFileResponseContext.OwinContext.Get<HttpContextBase>(typeof(HttpContextBase).FullName);
+                    LocalizedApplication.InstallResponseFilter(context);
+                }
+            }
+        };
+        app.UseStaticFiles(staticFileOptions);
+
         ...
     }
 }
 ```
+
+- Add the following handler to Global.asax:
+```csharp
+    /// <summary>
+    /// Handles the ReleaseRequestState event of the Application control.
+    /// </summary>
+    /// <param name="sender">The source of the event.</param>
+    /// <param name="e">The <see cref="EventArgs"/> instance containing the event data.</param>
+    protected void Application_ReleaseRequestState(object sender, EventArgs e)
+    {
+        HttpContextBase context = this.Request.GetOwinContext().Get<HttpContextBase>(typeof(HttpContextBase).FullName);
+        i18n.LocalizedApplication.InstallResponseFilter(context);
+    }
+```
+
 
 ### A reminder about folders in a web application
 
@@ -884,7 +1066,7 @@ to this folder by adding a `Web.config` file.
 i18n provides the ```i18n.ITranslateSvc``` interface that abstracts the basic operation of parsing
 and translating a string entity that may contain one or more nuggets:
 
-```
+```csharp
     public interface ITranslateSvc
     {
         string ParseAndTranslate(string entity);
@@ -898,20 +1080,22 @@ The following stock implementations of ```i18n.ITranslateSvc``` are provided by 
 - TranslateSvc_HttpContext - ITranslateSvc implementation based on an given HttpContext instance.
 - TranslateSvc_HttpContextCurrent - ITranslateSvc implementation based on the static HttpContext.Current instance (obtained at the time of calling the interface).
 
-### Build Notes
-
-The i18n project at present targets Visual Studio 2013 / .NET Framework 4 and requires the Visual Studio 2013 SDK libraries
-installed to build.
-
 ### Contributing
 
 There's lot of room for further enhancements and features to this library, and you are encouraged to fork it and
 contribute back anything new. Specifically, these would be great places to add more functionality:
 
 * Full OWIN support (see [Issue #241](https://github.com/turquoiseowl/i18n/issues/241))
-* Input and ideas on a safe universal nugget syntax (see issue #69).
+* Input and ideas on a safe universal nugget syntax (see issue [#69](https://github.com/turquoiseowl/i18n/issues/69)).
 * Plurals support.
 * Help me fix the bugs! Chances are I don't ship in your language. Fix what hurts. Please?
+
+#### Coding Style Guidlines
+
+* Pull Requests that add functionality to be accompanied with documentation added to this README.
+* Pull Request to be as granular as possible (e.g. limited to single features/enhancements).
+* All methods to be commented including helper routine.
+* 4-spaces used for tab indent.
 
 #### Line Endings
 
@@ -924,6 +1108,70 @@ to CR/LF when checking text files out of the index, and converting them back to 
 This behaviour is controlled via Git's ```core.autocrlf``` setting, which in this case would be set to ```true```.
 
 See [Dealing with line endings](https://help.github.com/articles/dealing-with-line-endings/) for more information.
+
+#### Build Notes
+
+The i18n project at present targets .NET Framework 4 and later. To build i18n from source, Visual Studio 2019 or later is recommended.
+
+### Known Issues
+
+* MVC controller names must be more than 3 chars ([#370](https://github.com/turquoiseowl/i18n/issues/370)).
+
+### Release History
+
+#### 2.1.17 (20201209)
+
+* FIX: Only every other nugget in messages.po is being translated ([#413](https://github.com/turquoiseowl/i18n/issues/413)). Fix for a regression introduced in v2.1.16.
+
+#### 2.1.16 (20201126)
+
+* ADDED: Enhanced support for translations invoked by background jobs (LanguageHelpers.ParseAndTranslate + HttpContextExtensions.GetRequestUserLanguagesAsString + IBackgroundTranslateSvc).
+* ADDED: i18n project automated build and test (Continuous Integration) with github actions.
+* FIX: i18n.LanguageTag.ExtractLangTagFromUrl returns/outputs incorrect values when passed an absolute url.
+* FIX: Problem with HttpContext.ParseAndTranslate helper method ([#338](https://github.com/turquoiseowl/i18n/issues/338)).
+* FIX: ArgumentNullException if the Content-Type header is not set in the response ([#337](https://github.com/turquoiseowl/i18n/issues/337)).
+* FIX: Missing PO comment lines breaks translation ([#351](https://github.com/turquoiseowl/i18n/issues/351)).
+
+#### 2.1.15 (20190814)
+
+* FIX: NullReferenceException caused by bad langtag ([#387](https://github.com/turquoiseowl/i18n/issues/387)).
+* FIX: LangTag extraction logic broken by URL with query string immediately after lantag ([#383](https://github.com/turquoiseowl/i18n/issues/383)).
+
+#### 2.1.14 (20180710)
+
+* FIX: Localization of outgoing URIs" feature issue in version 2.1.13 ([#374](https://github.com/turquoiseowl/i18n/issues/374)).
+
+#### 2.1.13 (20180707)
+
+* FIX: performance issues related to translations in the default application language ([#368](https://github.com/turquoiseowl/i18n/issues/368)).
+* FIX: URI fragments breaking localization of outgoing URIs ([#372](https://github.com/turquoiseowl/i18n/issues/372)).
+
+#### 2.1.11 (20180528)
+
+* Improved support for wildcards in BlackList and WhileList settings ([#319](https://github.com/turquoiseowl/i18n/issues/319)).
+* FIX: redundant updates to PO files ([#329](https://github.com/turquoiseowl/i18n/issues/329)).
+* Modifications to OWIN support ([#334](https://github.com/turquoiseowl/i18n/issues/334)) [BREAKING CHANGE].
+
+#### 2.1.10 (20161206)
+
+* New setting ```i18n.DisableReferences``` allows for the generation of lighter POT/PO files by excluding nugget references ([#304](https://github.com/turquoiseowl/i18n/issues/304)).
+* New setting ```i18n.GenerateTemplatePerFile``` enables the breakdown of the POT template file into one POT file per scanned file ([#314](https://github.com/turquoiseowl/i18n/issues/314)).
+* FIX: PostBuild bug introduced by release 2.1.9 ([#316](https://github.com/turquoiseowl/i18n/issues/316)).
+* FIX: Duplicate message properties in POT/PO files.
+* Introduced support for publishing regular pre-release packages to NuGet.
+
+#### 2.1.9 (20161125)
+
+* Support for customization of PO filenames and sources ([#305](https://github.com/turquoiseowl/i18n/issues/305)).
+* Support for modifying nugget translation at runtime ([#300](https://github.com/turquoiseowl/i18n/issues/300)).
+* Support for changing default i18n cookie name ([#296](https://github.com/turquoiseowl/i18n/issues/296)).
+* Added ```/api/``` to default UrlLocalizer.QuickUrlExclusionFilter ([#289](https://github.com/turquoiseowl/i18n/issues/289)). 
+* Support for converting outgoing URLs where un-rooted paths into rooted paths (common in ASP.NET WebForms) ([#286](https://github.com/turquoiseowl/i18n/issues/286)).
+
+#### 2.1.8 (20160807)
+
+* Support for ignoring Accept-Language request header ([#278](https://github.com/turquoiseowl/i18n/issues/278), [#285](https://github.com/turquoiseowl/i18n/issues/285)).
+* Support for optionally showing source context next to reference paths & line numbers ([#268](https://github.com/turquoiseowl/i18n/issues/268))
 
 ### Acknowledgments
 

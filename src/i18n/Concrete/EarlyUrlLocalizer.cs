@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Text.RegularExpressions;
+using System.Web;
 using i18n.Helpers;
 
 namespace i18n
@@ -89,7 +90,7 @@ namespace i18n
             // Continue handling request.
         }
 
-        public string ProcessOutgoing(
+        public string ProcessOutgoingNuggets(
             string entity, 
             string langtag, 
             System.Web.HttpContextBase context)
@@ -110,19 +111,6 @@ namespace i18n
         //
 
             Uri requestUrl = context != null ? context.Request.Url : null;
-
-            // Localize any HTTP headers in the response containing URLs.
-            if (context != null) {
-                foreach (string hdr in m_httpHeadersContainingUrls) {
-                    string hdrval = context.Response.Headers[hdr];
-                    if (!hdrval.IsSet()) {
-                        continue; }
-                    string urlNew = LocalizeUrl(context, hdrval, langtag, requestUrl, false);
-                    if (urlNew == null) {
-                        continue; }
-                    context.Response.Headers[hdr] = urlNew;
-                }
-            }
             
             // Localize any nuggets in the entity.
             return m_regexHtmlUrls.Replace(
@@ -149,6 +137,28 @@ namespace i18n
                 });
         }
 
+        public void ProcessOutgoingHeaders(string langtag, HttpContextBase context)
+        {
+            Uri requestUrl = context != null ? context.Request.Url : null;
+
+            // Localize urls in HTTP headers.
+            if (context != null)
+            {
+                foreach (string headerName in m_httpHeadersContainingUrls)
+                {
+                    string value = context.Response.Headers[headerName];
+                    if (value.IsSet())
+                    {
+                        string urlNew = LocalizeUrl(context, value, langtag, requestUrl, false);
+                        if (urlNew.IsSet())
+                        {
+                            context.Response.Headers[headerName] = urlNew;
+                        }
+                    }
+                }
+            }
+        }
+
     #endregion
 
     // Implementation
@@ -157,7 +167,7 @@ namespace i18n
         /// Regex for finding and replacing urls in html.
         /// </summary>
         public static Regex m_regexHtmlUrls = new Regex(
-            "(?<pre><(?:script|img|a|area|link|base|input|frame|iframe|form)\\b.*?(?:src|href|action)\\s*=\\s*[\"']\\s*)(?<url>.+?)(?<post>\\s*[\"'][^>]*?>)",
+            "(?<pre><(?:script|img|a|area|link|base|input|frame|iframe|form)\\b[^>]*?\\b(?:src|href|action)\\s*=\\s*[\"']\\s*)(?<url>.+?)(?<post>\\s*[\"'][^>]*?>)",
             RegexOptions.CultureInvariant | RegexOptions.IgnoreCase | RegexOptions.Singleline);
                 // The above supports most common ways for a URI to appear in HTML/XHTML.
                 // Note that if we fail to catch a URL here, it is not fatal; it only means we don't avoid a redirect
@@ -224,6 +234,13 @@ namespace i18n
             if (m_urlLocalizer.ExtractLangTagFromUrl(context, url, UriKind.RelativeOrAbsolute, incomingUrl, out urlNonlocalized) != null) {
                 return null; } // original
 
+            // If URL is invalid...leave matched token alone.
+            // NB: Uri.IsWellFormedUriString has odd URI fragment handling: if a valid URI contains a fragment 
+            // then it returns false. Go figure!
+            if (!url.Contains("#")
+                && !Uri.IsWellFormedUriString(url, UriKind.RelativeOrAbsolute)) {
+                return null; } // original
+
             // If URL is not local (i.e. remote host)...leave matched token alone.
             if (requestUrl != null && !requestUrl.IsLocal(url)) {
                 return null; } // original
@@ -231,6 +248,34 @@ namespace i18n
             // Is URL explicitly excluded from localization?
             if (!m_urlLocalizer.FilterOutgoing(url, requestUrl)) {
                 return null; } // original
+
+            // If url is un-rooted...make it rooted based on any current request URL.
+            // This is to resolve problems caused to i18n with resource URL paths relative to the 
+            // current page (see issue #286).
+            // By un-rooted we mean the url is not absolute (i.e. it starts from the path component),
+            // and that that path component itself is a relative path (i.e. it doesn't start with a /).
+            // In doing so we also eliminate any "../..", "./", etc.
+            // Examples:
+            //      url (before)                            requestUrl                  url (after)
+            //      -------------------------------------------------------------------------------------------------------------------
+            //      content/fred.jpg                        http://example.com/blog/    /blog/content/fred.jpg              (changed)
+            //      content/fred.jpg                        http://example.com/blog     /content/fred.jpg                   (changed)
+            //      /content/fred.jpg                       http://example.com/blog/    /content/fred.jpg                   (unchanged)
+            //      http://example.com/content/fred.jpg     http://example.com/blog/    http://example.com/content/fred.jpg (unchanged)
+            // See also test cases in ResponseFilterTests.ResponseFilter_can_patch_html_urls.
+            //
+            if (requestUrl != null) {
+                bool urlIsUnrooted = !url.StartsWith("/")
+                    && (!url.Contains(":") || !Uri.IsWellFormedUriString(url, UriKind.Absolute));
+                    // NB: the above is somewhat elaborate so as to avoid an object allocation
+                    // in all but edge cases. Note also that Uri.IsWellFormedUriString internally
+                    // simply does a Uri.TryCreate (at least as of .NET 4.6.1).
+                if (urlIsUnrooted) {
+                    Uri newUri = new Uri(requestUrl, url);
+                    url = newUri.PathAndQuery + newUri.Fragment;
+                        // NB: if there is no fragment then newUri.Fragment == ""
+                }
+            }
 
             // Localize the URL.
             return m_urlLocalizer.SetLangTagInUrlPath(context, url, UriKind.RelativeOrAbsolute, langtag);

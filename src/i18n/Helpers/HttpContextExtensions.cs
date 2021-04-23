@@ -1,8 +1,5 @@
 ﻿using System;
-using System.Threading;
-using System.Globalization;
 using System.Collections.Generic;
-using System.Linq;
 using System.Text;
 using i18n.Helpers;
 
@@ -10,6 +7,19 @@ namespace i18n
 {
     public static class HttpContextExtensions
     {
+        static HttpContextExtensions()
+        {
+            GetRequestUserLanguagesImplementation = (context) =>
+            {
+                return LanguageItem.ParseHttpLanguageHeader(context.Request.Headers["Accept-Language"]);
+                // NB: originally we passed LocalizedApplication.Current.DefaultLanguageTag
+                // here as the second parameter i.e. to specify the PAL. However, this was
+                // found to be incorrect when operating i18n with EarlyUrlLocalization disabled,
+                // as SetPrincipalAppLanguageForRequest was not being called, that normally
+                // overwriting the PAL set erroneously here.
+            };
+        }
+
         /// <summary>
         /// Returns an System.Web.HttpContextBase for the current System.Web.HttpContext.
         /// Facilitates efficient consolidation of methods that require support for both 
@@ -82,10 +92,19 @@ namespace i18n
         /// <param name="context">Describes the current request.</param>
         /// <param name="entity">String containing zero or more fully-formed nuggets which are to be translated according to the language selection of the current request.</param>
         /// <returns>Localized (translated) entity.</returns>
+        /// <seealso cref="i18n.LanguageHelpers.ParseAndTranslate(string, i18n.LanguageItem[])"/>
         public static string ParseAndTranslate(this System.Web.HttpContext context, string entity)
         {
             return context.GetHttpContextBase().ParseAndTranslate(entity);
         }
+
+        /// <summary>
+        /// Returns the translation of the passed string entity which may contain zero or more fully-formed nugget.
+        /// </summary>
+        /// <param name="context">Describes the current request.</param>
+        /// <param name="entity">String containing zero or more fully-formed nuggets which are to be translated according to the language selection of the current request.</param>
+        /// <returns>Localized (translated) entity.</returns>
+        /// <seealso cref="i18n.LanguageHelpers.ParseAndTranslate(string, i18n.LanguageItem[])"/>
         public static string ParseAndTranslate(this System.Web.HttpContextBase context, string entity)
         {
         // For impl. notes see ResponseFilter.Flush().
@@ -100,7 +119,7 @@ namespace i18n
             if (UrlLocalizer.UrlLocalizationScheme != UrlLocalizationScheme.Void) {
                 var earlyUrlLocalizer = LocalizedApplication.Current.EarlyUrlLocalizerForApp;
                 if (earlyUrlLocalizer != null) {
-                    entity = earlyUrlLocalizer.ProcessOutgoing(
+                    entity = earlyUrlLocalizer.ProcessOutgoingNuggets(
                         entity, 
                         context.GetPrincipalAppLanguageForRequest().ToString(),
                         context); }
@@ -194,18 +213,61 @@ namespace i18n
             if (UserLanguages == null)
             {
                 // Construct UserLanguages list and cache it for the rest of the request.
-                context.Items["i18n.UserLanguages"] 
-                    = UserLanguages 
-                    = LanguageItem.ParseHttpLanguageHeader(
-                        context.Request.Headers["Accept-Language"]);
-                            // NB: originally we passed LocalizedApplication.Current.DefaultLanguageTag
-                            // here as the second parameter i.e. to specify the PAL. However, this was
-                            // found to be incorrect when operating i18n with EarlyUrlLocalization disabled,
-                            // as SetPrincipalAppLanguageForRequest was not being called, that normally
-                            // overwriting the PAL set erroneously here.
+                context.Items["i18n.UserLanguages"] = UserLanguages = GetRequestUserLanguagesImplementation(context);
             }
             return UserLanguages;
         }
+        
+        /// <summary>
+        /// Returns a string representing a collection of languages supported by the user-agent, in descending order
+        /// of preference. The first item in the collection refers to any Principle Application Language (PAL)
+        /// for the request determined by EarlyUrlLocalization (which calls SetPrincipalAppLanguageForRequest),
+        /// or is null if EarlyUrlLocalization is disabled.
+        /// </summary>
+        /// <param name="context">Context of the current request.</param>
+        /// <returns>
+        /// Compact string representation of the language item array.
+        /// Example values:
+        ///     "fr-CA;q=1,fr;q=0.5"
+        ///     "en-CA;q=2,de;q=0.5,en;q=1,fr-FR;q=0,ga;q=0.5"
+        ///     "en-CA;q=1,de;q=0.5,en;q=1,fr-FR;q=0,ga;q=0.5"
+        ///     "en-CA;q=1"
+        ///     "?;q=2"
+        ///     "?;q=2,de;q=0.5,en;q=1,fr-FR;q=0,ga;q=0.5"
+        /// </returns>
+        /// <remarks>
+        /// This method is optimised such that the collection is built only once per request.
+        /// </remarks>
+        /// See <see cref="LanguageItem.ParseHttpLanguageHeader"/>.
+        /// See <see cref="LanguageItem.ParseHttpLanguageHeader"/>.
+        /// See <see cref="HttpContextExtensions.GetRequestUserLanguagesAsString"/>.
+        /// See <see cref="LanguageItem.DehydrateLanguageItemsToString"/>.
+        public static string GetRequestUserLanguagesAsString(this System.Web.HttpContextBase context)
+        {
+            return LanguageItem.DehydrateLanguageItemsToString(GetRequestUserLanguages(context));
+        }
+
+        /// <summary>
+        /// Describes a procedure for determining the user languages for the current request.
+        /// </summary>
+        /// <param name="context">
+        /// Describes the current request. May be null if called outside of any request.
+        /// </param>
+        /// <returns>The language items which are determined for the current current request.</returns>
+        /// <remarks>
+        /// <see cref="HttpContextExtensions.GetRequestUserLanguagesImplementation"/>
+        /// </remarks>
+        public delegate LanguageItem[] GetRequestUserLanguagesProc(System.Web.HttpContextBase context);
+
+        /// <summary>
+        /// Registers the procedure used by instances of this class for determining the 
+        /// available user languages for the current request.
+        /// </summary>
+        /// <remarks>
+        /// The default implementation is set in the static constructor and will check the `Accept-Language` header attribute 
+        /// for the available languages in the current request.
+        /// </remarks>
+        public static GetRequestUserLanguagesProc GetRequestUserLanguagesImplementation { get; set; }
 
         /// <summary>
         /// Add a Content-Language HTTP header to the response, based on any languages
@@ -272,7 +334,7 @@ namespace i18n
             // 1. Inferred user languages (cookie and Accept-Language header)
             // 2. App Languages.
             LanguageTag lt = null;
-            System.Web.HttpCookie cookie_langtag = context.Request.Cookies.Get("i18n.langtag");
+            System.Web.HttpCookie cookie_langtag = context.Request.Cookies.Get(LocalizedApplication.Current.CookieName);
             if (cookie_langtag != null) {
                 lt = LanguageHelpers.GetMatchingAppLanguage(cookie_langtag.Value); }
             if (lt == null) {
